@@ -3,7 +3,7 @@ import numpy as np
 import pdb
 
 # -----------------------------------------------------------
-# Board games classes (tic-tac-toe, gomoku, renju, connect4, checkers, chess, ...)
+# Chess
 
 # Two end modes: with kings -> the player wins when king is mated, without kings ->
 # the player wins after removing all opponens pieces
@@ -14,6 +14,8 @@ class Chess():
     Rook = 4
     Queen = 5
     King = 6
+
+   
 
     BlackShift = 1000   # shift of black pieces identifies
 
