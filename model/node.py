@@ -1,5 +1,7 @@
 import numpy as np
 
+# Tu prawie nic nie !!!
+
 class Node:
     def __init__(self, state, parent = None):
         self.state = state
@@ -12,7 +14,3 @@ class Node:
     def visited(self):
        return self.visits != 0
 
-
-def calc_ucb(node, state, net):
-    for child in node.children:
-        if child.state == state:

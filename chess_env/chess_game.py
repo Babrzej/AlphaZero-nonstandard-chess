@@ -541,7 +541,7 @@ class Chess():
                     NextState.white_blocked = True
 
         # output: player, list of states after possible moves, rewards for moves:
-        return NextState, #Reward
+        return NextState, Reward
     
     def action_to_string(self,action):
         col_dict = {0:'a', 1:'b',2:'c',3:'d',4:'e',5:'f',6:'g',7:'h',8:'i',9:'j',10:'k',11:'l',12:'m', \
