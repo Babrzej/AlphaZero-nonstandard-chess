@@ -30,13 +30,13 @@ class Chess():
                         'k':King, 'K':King+BlackShift}
 
     class ChessState():
-        def __init__(self,_Board = None, _white_king_checked = None, _black_king_checked = None, \
+        def __init__(self,_board = None, _white_king_checked = None, _black_king_checked = None, \
             _white_king_mated = None, _black_king_mated = None, \
             _white_blocked = None, _black_blocked = None, \
             _white_small_castling_possible = None, _black_small_castling_possible = None, \
             _white_big_castling_possible = None, _black_big_castling_possible = None, \
             _white_2pawn_column = None, _black_2pawn_column = None):
-            self.Board = _Board
+            self.Board = _board
             self.white_king_checked = _white_king_checked
             self.black_king_checked = _black_king_checked
             self.white_king_mated = _white_king_mated
