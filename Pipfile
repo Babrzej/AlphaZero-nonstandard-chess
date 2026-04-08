@@ -5,9 +5,10 @@ name = "pypi"
 
 [packages]
 numpy = "*"
-torch = "*"
+torch = ">=2.4.0"
 matplotlib = "*"
 pygame = "*"
+numba = "*"
 
 [dev-packages]
 
