@@ -454,10 +454,10 @@ def experiment_par_train():
     # Wybór planszy szachowej:
     #game = bfun.Chess("szachy_plansza_3x3")
     #game = bfun.Chess("szachy_plansza_4x4")
-    game = bfun.Chess("chess_env/boards/szachy_plansza_5x5")
+    #game = bfun.Chess("chess_env/boards/szachy_plansza_5x5")
     #game = bfun.Chess("szachy_plansza_5x3_bez_kroli")
     #game = bfun.Chess("szachy_plansza_5x10")
-    #game = bfun.Chess("szachy_plansza_standardowa")
+    game = bfun.Chess("chess_env/boards/szachy_plansza_standardowa")
     #game = bfun.Chess("szachy_plansza_14x14")
 
     load_q_from_file = False

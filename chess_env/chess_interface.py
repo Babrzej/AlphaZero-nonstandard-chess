@@ -476,7 +476,13 @@ class Interface_Chess():
 				NextState, Reward =  game_object.next_state_and_reward(player,State, actions[action_nr])
 				self.draw_empty(actions[action_nr][1], actions[action_nr][2])
 				self.draw_empty(actions[action_nr][3], actions[action_nr][4])
+				# En passant: pawn moved diagonally to an empty square in previous State.
+				if ((actions[action_nr][0] == self.game_object.Pawn) | \
+					(actions[action_nr][0] == self.game_object.Pawn + self.game_object.BlackShift)) & \
+					(actions[action_nr][2] != actions[action_nr][4]) & (State.Board[actions[action_nr][3], actions[action_nr][4]] == 0):
+					self.draw_empty(actions[action_nr][1], actions[action_nr][4])
 				#if promotion_piece != None:
+                
 				if len(actions[action_nr]) > 5:
 					self.draw_piece(actions[action_nr][3], actions[action_nr][4], actions[action_nr][5])
 				else:

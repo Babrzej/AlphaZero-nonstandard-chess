@@ -88,7 +88,7 @@ def get_pawn_moves(board: Board2D, r: int, c: int, player: int) -> Moves1D:
             target_idx = next_r * BOARD_SIZE + next_c
             
             # Check for enemy piece OR En Passant target square
-            if (enemy_min <= target_piece <= enemy_max) or (target_idx == ep_sq):
+            if (enemy_min <= target_piece <= enemy_max): # there shoyuld be another if for en passant but we will add it later
                 
                 if next_r == promo_row:
                     # Promotion options via capture

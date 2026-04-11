@@ -35,7 +35,7 @@ class Chess():
             _white_blocked = None, _black_blocked = None, \
             _white_small_castling_possible = None, _black_small_castling_possible = None, \
             _white_big_castling_possible = None, _black_big_castling_possible = None, \
-            _white_2pawn_column = None, _black_2pawn_column = None):
+            _white_2pawn_column = None, _black_2pawn_column = None, _en_passant_target = None, _halfmove_clock = None, _position_history = None):
             self.Board = _board
             self.white_king_checked = _white_king_checked
             self.black_king_checked = _black_king_checked
@@ -49,7 +49,9 @@ class Chess():
             self.black_big_castling_possible = _black_big_castling_possible
             self.white_2pawn_column = _white_2pawn_column
             self.black_2pawn_column = _black_2pawn_column
-
+            self.en_passant_target = _en_passant_target  # Tuple (row, col) or None
+            self.halfmove_clock = _halfmove_clock
+            self.position_history = _position_history if _position_history is not None else {}
     # class Move():
     #     def __init__(self, _piece_type, _r_from, _c_from, _r_to, _c_to, _piece_to_promote = None) -> None:
     #         self.piece_type = _piece_type
@@ -162,6 +164,27 @@ class Chess():
             self.white_objective = self.Target_CheckmateKing
         else:
             self.white_objective = self.Target_BlockEnemy
+            
+        # Determine specific rules based on board size
+        self.rules = {
+            'double_step': True,
+            'en_passant': True,
+            'castling': True,
+            'promotion': 'standard'  # Default is standard promotion (Q, R, B, N)
+        }
+        
+        if self.num_of_rows == 4 and self.num_of_columns == 4:
+            self.rules['double_step'] = False
+            self.rules['en_passant'] = False
+            self.rules['castling'] = False
+            
+            # CHANGED: Allow standard promotion for 4x4 board instead of 'rook_only'
+            self.rules['promotion'] = 'standard' 
+            
+        elif (self.num_of_rows in [5, 6]) and (self.num_of_columns in [5, 6]):
+            self.rules['double_step'] = False
+            self.rules['en_passant'] = False
+            self.rules['castling'] = False
         
 
     def initial_state(self):
@@ -183,12 +206,14 @@ class Chess():
             _black_big_castling_possible = False
         _white_2pawn_column = None
         _black_2pawn_column = None
+        
+        # DODANE: Inicjalizacja licznika na 0 i pustej historii
         IniState = self.ChessState(self.InitialBoard, _white_king_checked, _black_king_checked, \
             _white_king_mated, _black_king_mated, \
             _white_blocked, _black_blocked, \
             _white_small_castling_possible,_black_small_castling_possible,\
             _white_big_castling_possible, _black_big_castling_possible,\
-            _white_2pawn_column, _black_2pawn_column)
+            _white_2pawn_column, _black_2pawn_column, _en_passant_target=None, _halfmove_clock=0, _position_history={})
    
         return IniState
 
@@ -197,11 +222,18 @@ class Chess():
     # Calculated in local area of action 
     def heuristic_value_change(self, State, action, player):
         result = 0
+        piece = action
+        r_from = action[1]
+        c_from = action[2]
         r_to = action[3]
         c_to = action[4]
         
         # material gain:
         piece_to_capture = State.Board[r_to,c_to]
+        
+        if piece_to_capture == 0 and (piece == self.Pawn or piece == self.Pawn + self.BlackShift) and c_from != c_to:
+            piece_to_capture = self.Pawn % self.BlackShift
+            
         if piece_to_capture != 0:
             if piece_to_capture == self.Pawn % self.BlackShift:
                 result += 1
@@ -238,11 +270,27 @@ class Chess():
 
     # checking if end of game (draw)
     def end_of_game(self, _R = 0, _number_of_moves = 0, State = [], _action_nr = 0):
-        if (np.abs(_R) > 0.95)|(_number_of_moves >= 10*self.num_of_rows*self.num_of_columns)|\
-            (State.white_king_mated == True)|(State.black_king_mated == True)|\
-            (State.white_blocked == True)|(State.black_blocked == True):
+        # 1. Trzykrotne powtórzenie pozycji (Threefold Repetition)
+        if any(count >= 3 for count in State.position_history.values()):
             return True
-        else: return False
+
+        # 2. Zasada 50 ruchów (100 półruchów)
+        if State.halfmove_clock >= 100:
+            return True
+            
+        # 3. Pat (Stalemate) - gracz zablokowany, brak szacha
+        if State.white_blocked or State.black_blocked:
+            return True
+
+        # 4. Limit bezpieczeństwa (Twoje 10 * N * N)
+        if _number_of_moves >= 10 * self.num_of_rows * self.num_of_columns:
+            return True
+
+        # 5. Wygrana (Checkmate)
+        if (np.abs(_R) > 0.95) or State.white_king_mated or State.black_king_mated:
+            return True
+            
+        return False
 
     def state_key(self, State):
         return str(State.Board) 
@@ -432,6 +480,9 @@ class Chess():
         return list_of_checking_figures, list_of_checking_by_obstacle
 
     # realizacja ruchu przy założeniu, że ruch jest dopuszczalny: 
+    # Calculate next state and reward for given action
+    # action = [piece, r_from, c_from, r_to, c_to, (optionally) promotion_piece]
+    # Poprawiona kolejność: self, player, State, action
     def next_state_and_reward(self, player, State, action):
         player_opo = 3 - player
         if player == 1:
@@ -443,7 +494,6 @@ class Chess():
        
         shift_opo = self.BlackShift - shift
  
-        # making action:
         NextState = self.ChessState()
         NextState.Board = np.copy(State.Board)
         NextState.white_big_castling_possible = State.white_big_castling_possible
@@ -452,34 +502,55 @@ class Chess():
         NextState.black_small_castling_possible = State.black_small_castling_possible
         NextState.white_king_checked = False
         NextState.black_king_checked = False
+        
+        # --- NOWE: Inicjalizacja dla licznika ruchów i en passant ---
+        NextState.halfmove_clock = State.halfmove_clock + 1
+        NextState.en_passant_target = None
 
         promotion = None
+        
+        # Poprawne rozpakowywanie listy action
         if len(action) == 5:
             piece, r_from, c_from, r_to, c_to = action
         elif len(action) == 6:
             piece, r_from, c_from, r_to, c_to, promotion = action
+            
+        is_capture = (State.Board[r_to, c_to] != 0)
+
         NextState.Board[r_from,c_from] = 0
         if promotion != None:
             NextState.Board[r_to, c_to] = promotion
+            NextState.halfmove_clock = 0 # Promocja to ruch pionem, więc zerujemy
         else:
             NextState.Board[r_to, c_to] = piece
-        # short castling (roszada mała):
-        # to czy roszada była dozwolona powinno być sprawdzone w actions() 
+
+        # --- NOWE: Obsługa En Passant i zerowanie licznika ---
+        if piece == self.Pawn or piece == self.Pawn + self.BlackShift:
+            NextState.halfmove_clock = 0
+            # Jeśli pion bił na puste pole, to musiał być En Passant
+            if not is_capture and c_from != c_to:
+                NextState.Board[r_from, c_to] = 0 # Usuwamy zbitego piona (stoi na starym rzędzie)
+            # Jeśli pion skoczył o 2 pola, ustawiamy cel bicia w przelocie
+            if abs(r_to - r_from) == 2:
+                NextState.en_passant_target = ((r_from + r_to) // 2, c_from)
+
+        if is_capture:
+            NextState.halfmove_clock = 0
+
+        # --- TWOJA ORYGINALNA LOGIKA ROSZAD ---
         if (piece == self.King)&(r_from == 7)&(c_from == 4)&(r_to == 7)&(c_to == 6):
             NextState.Board[7,7] = 0
             NextState.Board[7,5] = self.Rook
         elif (piece == self.King + self.BlackShift)&(r_from == 0)&(c_from == 4)&(r_to == 0)&(c_to == 6):
             NextState.Board[0,7] = 0
             NextState.Board[0,5] = self.Rook + self.BlackShift
-        # long castling (roszada długa):
         elif (piece == self.King)&(r_from == 7)&(c_from == 4)&(r_to == 7)&(c_to == 2):
             NextState.Board[7,0] = 0
             NextState.Board[7,3] = self.Rook
         elif (piece == self.King + self.BlackShift)&(r_from == 0)&(c_from == 4)&(r_to == 0)&(c_to == 2):
-            NextState.Board[0,7] = 0
+            NextState.Board[0,0] = 0
             NextState.Board[0,3] = self.Rook + self.BlackShift 
 
-        # verification if castling is still possible:
         if (piece == self.Rook)&(r_from == 7)&(c_from == 0):
             NextState.white_big_castling_possible = False
         elif (piece == self.Rook)&(r_from == 7)&(c_from == 7):
@@ -495,41 +566,48 @@ class Chess():
             NextState.black_big_castling_possible = False
             NextState.black_small_castling_possible = False
 
+        # --- TWOJA ORYGINALNA LOGIKA SZACHA I MATA ---
+        # --- TWOJA ORYGINALNA LOGIKA SZACHA I MATA (ZABEZPIECZONA) ---
         Reward = 0
         if player_objective == self.Target_CheckmateKing:
-            # finding opposite king position:
+            opo_king_pos = None # Inicjalizacja zmiennej!
+            
             for r in range(self.num_of_rows):
                 for c in range(self.num_of_columns):
                     if NextState.Board[r,c] == self.King + shift_opo:
                         opo_king_pos = [r,c]
-                        break
-            # finding if opposite king is checked:
-            list_of_checking = self.__list_of_checking_figures(NextState.Board,opo_king_pos,player)
-            list_of_opo_actions = self.actions(NextState, player_opo)
-            
-            if len(list_of_checking) > 0:
-                if player == 1:
-                    NextState.black_king_checked = True
-                else:
-                    NextState.white_king_checked = True
+                        break # Przerywa wewnętrzną pętlę
+                if opo_king_pos is not None:
+                    break # Przerywa zewnętrzną pętlę (optymalizacja)
 
-                # finding if opposite king is checkmated:  
-                if len(list_of_opo_actions) == 0:
-                    if player == 1:
-                        Reward = 1
-                        NextState.black_king_mated = True
-                        #print("checkmate against black!")
-                    else:
-                        Reward = -1
-                        NextState.white_king_mated = True
-                        #print("checkmate against white!")
-            elif len(list_of_opo_actions) == 0:
+            # Jeśli król przeciwnika zniknął z planszy (został fizycznie zbity)
+            if opo_king_pos is None:
                 if player == 1:
-                    NextState.black_blocked = True
+                    NextState.black_king_mated = True
+                    Reward = 1
                 else:
-                    NextState.white_blocked = True
-                        
+                    NextState.white_king_mated = True
+                    Reward = -1
+            else:
+                # Król jest na planszy, sprawdzamy normalnie
+                list_of_checking = self.__list_of_checking_figures(NextState.Board,opo_king_pos,player)
+                list_of_opo_actions = self.actions(NextState, player_opo)
                 
+                if len(list_of_checking) > 0:
+                    if player == 1: NextState.black_king_checked = True
+                    else: NextState.white_king_checked = True
+
+                    if len(list_of_opo_actions) == 0:
+                        if player == 1:
+                            Reward = 1
+                            NextState.black_king_mated = True
+                        else:
+                            Reward = -1
+                            NextState.white_king_mated = True
+                elif len(list_of_opo_actions) == 0:
+                    if player == 1: NextState.black_blocked = True
+                    else: NextState.white_blocked = True
+                        
         elif player_objective == self.Target_BlockEnemy:
             list_of_opo_actions = self.actions(NextState, player_opo)
             if len(list_of_opo_actions) == 0:
@@ -540,7 +618,14 @@ class Chess():
                     Reward = -1
                     NextState.white_blocked = True
 
-        # output: player, list of states after possible moves, rewards for moves:
+        # --- NOWE: Historia pozycji do trzykrotnego powtórzenia ---
+        pos_key = (NextState.Board.tobytes(), player_opo, 
+                   NextState.white_small_castling_possible, NextState.black_small_castling_possible,
+                   NextState.en_passant_target)
+        
+        NextState.position_history = State.position_history.copy()
+        NextState.position_history[pos_key] = NextState.position_history.get(pos_key, 0) + 1
+
         return NextState, Reward
     
     def action_to_string(self,action):
@@ -583,6 +668,8 @@ class Chess():
                                 moves_potential.append([self.Pawn+shift,r,c,rup,c,self.Queen+shift])
                             else:               # only move
                                 moves_potential.append([self.Pawn+shift,r,c,rup,c])
+                        
+                        # Standard captures
                         for i in [-1,1]:
                             c2 = c+i
                             if (c2 >= 0)&(c2 < self.num_of_columns):
@@ -594,16 +681,18 @@ class Chess():
                                         moves_potential.append([self.Pawn+shift,r,c,rup,c2,self.Queen+shift])
                                     else:        # only beating opponent piece
                                         moves_potential.append([self.Pawn+shift,r,c,rup,c2])
-                    if ((r == 1)&(player == 2))|((r == self.num_of_rows-2)&(player == 1)):
-                        r2up = r + 2*up
-                        if (r2up >= 0)&(r2up < self.num_of_rows):
-                            if (Board[rup,c] == 0)&(Board[r2up,c] == 0):
-                                if (r2up == 0)|(r2up == self.num_of_rows-1): # moves with promotion 
-                                    moves_potential.append([self.Pawn+shift,r,c,r2up,c,self.Knight+shift])
-                                    moves_potential.append([self.Pawn+shift,r,c,r2up,c,self.Bishop+shift])
-                                    moves_potential.append([self.Pawn+shift,r,c,r2up,c,self.Rook+shift])
-                                    moves_potential.append([self.Pawn+shift,r,c,r2up,c,self.Queen+shift])
-                                else:               # only move
+                                        
+                                # En Passant Capture
+                                elif self.rules['en_passant'] and State.en_passant_target == (rup, c2):
+                                    # Appending standard move format, execution will handle the captured pawn removal
+                                    moves_potential.append([self.Pawn+shift,r,c,rup,c2])
+
+                    # Double Step
+                    if self.rules['double_step']:
+                        if ((r == 1)&(player == 2))|((r == self.num_of_rows-2)&(player == 1)):
+                            r2up = r + 2*up
+                            if (r2up >= 0)&(r2up < self.num_of_rows):
+                                if (Board[rup,c] == 0)&(Board[r2up,c] == 0):
                                     moves_potential.append([self.Pawn+shift,r,c,r2up,c])
 
                     # .................... bicie w przelocie (en passant)  może odsłonić króla            
@@ -685,7 +774,7 @@ class Chess():
                                     moves_potential.append([self.King + shift,r,c,0,6])
                     if (len(king_checking_pieces) == 0)&(State.black_big_castling_possible == True):
                         if (player == 2)& ([r,c] == [0,4]) & \
-                            (Board[0,0] == self.Rook)&(Board[0,1] == 0)&(Board[0,2] == 0)&(Board[0,3] == 0):
+                            (Board[0,0] == self.Rook + self.BlackShift)&(Board[0,1] == 0)&(Board[0,2] == 0)&(Board[0,3] == 0):
                             list_of_checking_figures = self.__list_of_checking_figures(Board,[0,2],player_opo)
                             if len(list_of_checking_figures) == 0:
                                 list_of_checking_figures = self.__list_of_checking_figures(Board,[0,3],player_opo)
