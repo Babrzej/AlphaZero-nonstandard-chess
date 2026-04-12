@@ -1,5 +1,5 @@
 import numpy as np
-from node import Node
+from model.node import Node
 from chess_env.chess_game import Chess
 
 #---------------------------------------------
@@ -8,6 +8,7 @@ from chess_env.chess_game import Chess
 # i ma sens jakbyś chciał kontynuowac
 # Więc możesz przede wszystkim "podpiąć" silnik szachowy
 # i jako nn jakaś funckje która zwraca losowe wartości
+# prawdopodobnie dziala :)
 #--------------------------------------------
 
 # Constant for the UCB calculation

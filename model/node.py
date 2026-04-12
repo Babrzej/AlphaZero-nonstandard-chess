@@ -1,6 +1,6 @@
 import numpy as np
 
-# Tu prawie nic nie !!!
+# Tu prawie nic nie ma!!!
 
 class Node:
     def __init__(self, state = None, player = None, action = None, parent = None):
