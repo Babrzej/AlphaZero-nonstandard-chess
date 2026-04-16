@@ -1,5 +1,3 @@
-import numpy as np
-
 # Tu prawie nic nie ma!!!
 
 class Node:
@@ -9,9 +7,11 @@ class Node:
         self.player = player
         self.value = 0
         self.visits = 0
-        self.avg_value = 0
         self.children = []
         self.parent = parent
+        self.possible_moves = []
+        self.move_id = 0
+        self.terminal = False
 
     def __repr__(self):
         # Format the action for readability (e.g., if it's a list or tuple)

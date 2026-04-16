@@ -9,6 +9,7 @@ torch = ">=2.4.0"
 matplotlib = "*"
 pygame = "*"
 numba = "*"
+ipykernel = "*"
 
 [dev-packages]
 

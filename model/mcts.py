@@ -1,24 +1,16 @@
 import numpy as np
 from model.node import Node
-from chess_env.chess_game import Chess
-
-#---------------------------------------------
-# !!! IMPORTANT !!!
-# Nie obiecuje że to działa (raczej nie działa xD)
-# i ma sens jakbyś chciał kontynuowac
-# Więc możesz przede wszystkim "podpiąć" silnik szachowy
-# i jako nn jakaś funckje która zwraca losowe wartości
-# prawdopodobnie dziala :)
-#--------------------------------------------
 
 # Constant for the UCB calculation
 c_ucb = np.sqrt(2)
 
 class MCTS:
-    def __init__(self, game, player, net):
+    def __init__(self, game, state, player, net):
         #TODO: analyze all needed parameters
         self.game = game
         self.root = Node(state = game.initial_state(), player = player)
+        self.root.possible_moves = self.game.actions(game.initial_state(), player)
+        self.root.children = np.empty(len(self.root.possible_moves), dtype = object)
         self.net = net
 
     def __repr__(self):
@@ -34,48 +26,37 @@ class MCTS:
 
     def select(self, node):
         #all allowed moves with their ucbs and their policies
-        possible_moves = self.game.actions(node.state, node.player)
-        ucb = []
+        if node.terminal:
+            return -1, node
 
         #policy = self.net.get_policy(node.state)
         #---------------------------------------------------------------------------------
-        raw_policy = np.random.random(len(possible_moves))
+        raw_policy = np.random.random(len(node.possible_moves))
         policy = raw_policy / np.sum(raw_policy)
         #---------------------------------------------------------------------------------
+        values = np.empty((len(node.possible_moves), 2), dtype = float)
+        values[:] = np.array([
+            (c.value, c.visits) if isinstance(c, Node) else (0.0, 0.0)
+            for c in node.children
+        ]).reshape(-1, 2)
+        ucb = calc_ucb(values, node.visits, policy)
+        best = np.argmax(ucb)
 
-        #we iterate over every move
-        for move, pol in zip(possible_moves, policy):
-            #TODO: make use of reward
-
-            move_visited = False
-            #we check if given move was already visited
-            for child in node.children:
-                if child.action == move:
-                    new_ucb = calc_ucb(node.visits, child.visits, child.value, pol)
-                    ucb.append(new_ucb)
-                    move_visited = True
-                    break
-
-            if not move_visited:
-                new_ucb = calc_ucb(node.visits, 0, 0, pol)
-                ucb.append(new_ucb)
-
-        selected_move = possible_moves[np.argmax(ucb)]
-        selected_state, reward = self.game.next_state_and_reward(node.player, node.state, selected_move)
-
-        #If we already visited we go deeper
-        for child in node.children:
-            if child.action == selected_move:
-                return self.select(child)
-
-        #Ultimately return newly visited move(its state and parent node)
-        return selected_move, selected_state, node
+        if isinstance(node.children[best], Node):
+            return self.select(node.children[best])
+        else:
+            return best, node
 
     #Create node for state visited first time
-    def expand(self, move, state, node):
-        child = Node(action=move, state=state, parent=node, player=3 - node.player)
-        node.children.append(child)
-        return child
+    def expand(self, move, node):
+        state, reward = self.game.next_state_and_reward(node.player, node.state, node.possible_moves[move])
+        child = Node(action=node.possible_moves[move], state=state, parent=node, player=3 - node.player)
+        child.possible_moves = self.game.actions(state, 3 - node.player)
+        child.children = np.empty(len(child.possible_moves), dtype = object)
+        if reward != 0:
+            child.terminal = True
+        node.children[move] = child
+        return child, reward
 
     def backpropagate(self, node, value):
         if node is None:
@@ -97,33 +78,49 @@ class MCTS:
         # Use the __repr__ we just made!
         print(f"{indent}{node}")
 
-        # Base case: Stop if we reach the maximum display depth or a leaf node
-        if depth >= max_depth or not node.children:
+        # Base case: Stop if we reach the maximum display depth
+        if depth >= max_depth:
             return
 
-        # Pro-Tip: Sort the children by visits before printing!
+        # Filter out unexpanded children (which are not Node objects)
+        valid_children = [c for c in node.children if isinstance(c, Node)]
+
+        # Stop if this is a leaf node with no expanded children
+        if not valid_children:
+            return
+
+        # Pro-Tip: Sort the valid children by visits before printing!
         # This puts the moves the AI is actually considering at the top.
-        sorted_children = sorted(node.children, key=lambda c: c.visits, reverse=True)
+        sorted_children = sorted(valid_children, key=lambda c: c.visits, reverse=True)
 
         for child in sorted_children:
             self.print_tree(child, depth + 1, max_depth)
 
     def iter(self, num_of_iterations):
         for i in range(num_of_iterations):
-            move, next_state, parent = self.select(self.root)
-            new_node = self.expand(move, next_state, parent)
-            #nn sim
-            value = np.random.random()*2 - 1
-            self.backpropagate(new_node, value)
+            move, parent = self.select(self.root)
+
+            if move == -1:
+                value = parent.value
+                self.backpropagate(parent, value)
+            else:
+                # nn sim
+                value = np.random.random() * 2 - 1
+                new_node, reward = self.expand(move, parent)
+                if reward != 0:
+                    self.backpropagate(new_node, reward)
+                else:
+                    self.backpropagate(new_node, value)
 
 
 
 
-def calc_ucb(visits_parent, visits, value, policy, c = c_ucb):
+
+def calc_ucb(values, visits_parent, policy, c = c_ucb):
+    value = values[:,0]
+    visits = values[:,1]
+    q = np.divide(value, visits, out=np.zeros_like(value), where=visits != 0)
     p = c * policy * np.sqrt(visits_parent) / (1 + visits)
-    if value == 0:
-        ucb = p
-    else:
-        ucb = value/visits + p
+    ucb = q + p
     return ucb
 
