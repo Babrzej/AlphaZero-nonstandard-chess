@@ -11,8 +11,8 @@ class Nett():
 net = Nett()
 game = Chess()
 
-tree = MCTS(game, 1, net,)
+tree = MCTS(game, None,1, net)
 
 if __name__ == "__main__":
-    tree.iter(100)
+    tree.iter(10)
     tree.print_tree()
