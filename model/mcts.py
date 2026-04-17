@@ -1,14 +1,43 @@
+from calendar import c
+
 import numpy as np
-from model.node import Node
 
 # Constant for the UCB calculation
 c_ucb = np.sqrt(2)
+
+class Node:
+    def __init__(self, state = None, player = None, action = None, parent = None):
+        self.action = action
+        self.state = state
+        self.player = player
+        self.value = 0
+        self.visits = 0
+        self.children = []
+        self.parent = parent
+        self.possible_moves = []
+        self.move_id = 0
+        self.terminal = False
+
+    def __repr__(self):
+        # Format the action for readability (e.g., if it's a list or tuple)
+        action_str = str(self.action) if self.action is not None else "Root"
+
+        # Calculate avg_value dynamically if it's not being updated elsewhere
+        avg = self.value / self.visits if self.visits > 0 else 0.0
+
+        return (f"<Node | Player: {self.player} | Action: {action_str} | "
+                    f"Visits: {self.visits} | AvgVal: {avg:.3f} | Children: {len(self.children)}>")
+
+
+    def visited(self):
+       return self.visits != 0
+
 
 class MCTS:
     def __init__(self, game, state, player, net):
         #TODO: analyze all needed parameters
         self.game = game
-        self.root = Node(state = game.initial_state(), player = player)
+        self.root = Node(state = state, player = player)
         self.root.possible_moves = self.game.actions(game.initial_state(), player)
         self.root.children = np.empty(len(self.root.possible_moves), dtype = object)
         self.net = net
@@ -112,7 +141,16 @@ class MCTS:
                 else:
                     self.backpropagate(new_node, value)
 
-
+    def output(self):
+        visits = np.zeros(len(self.root.children))
+        visits[:] = [
+            c.visits if isinstance(c, Node) else 0
+            for c in self.root.children
+        ]
+        best = np.argmax(visits)
+        policy = visits / np.sum(visits)
+        best_move = self.root.possible_moves[best]
+        return best_move, policy
 
 
 
