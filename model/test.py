@@ -14,5 +14,5 @@ game = Chess()
 tree = MCTS(game, None,1, net)
 
 if __name__ == "__main__":
-    tree.iter(10)
+    tree.iter(1000)
     tree.print_tree()
