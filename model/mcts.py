@@ -1,5 +1,3 @@
-from calendar import c
-
 import numpy as np
 
 # Constant for the UCB calculation
