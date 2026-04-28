@@ -3,8 +3,8 @@ import pickle
 import time
 import os
 import matplotlib.pylab as plt
-import chess_game as bfun
-import chess_interface as bgra
+import chess_env.chess_game as bfun
+import chess_env.chess_interface as bgra
 
 # Q-learning strategy using dictionary for Q-values in each known state: 
 class Strategy_Qdict:
@@ -556,4 +556,4 @@ def experiment_par_train():
     bgra.play_with_strategy(game_object = game, strategy = strategy_b, str_player=2)
 
 
-experiment_par_train()
+# experiment_par_train()  # Commented out - should be called explicitly, not on import
