@@ -32,7 +32,7 @@ class TicTacToe():
         return moves_potential
 
     def next_state_and_reward(self, player, State, action):
-        # Create a deep copy of the board to prevent mutating the parent state
+        # Create a deep copy of the board to  prevent mutating the parent state
         NextState = self.TicTacToeState(np.copy(State.Board))
         
         # Apply the move

@@ -1,5 +1,7 @@
-import torch
+from sre_parse import State
 
+import torch
+import numpy as np
 class ConvBatchBlock(torch.nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
         super(ConvBatchBlock, self).__init__()
@@ -65,7 +67,18 @@ class AlphaZeroNetwork(torch.nn.Module):
             torch.nn.Softmax(dim=1)
         )
         
-    def forward(self, input):
+    def state_to_tensor(self, State, player):
+        board = State.Board
+        x = np.zeros((2, 3, 3), dtype=np.float32)
+        x[0] = (board == player).astype(np.float32)
+        x[1] = (board == (3 - player)).astype(np.float32)
+        return torch.from_numpy(x).unsqueeze(0)
+    
+    def forward(self, state, player):
+        if isinstance(state, torch.Tensor):
+            input = state
+        else:
+            input = self.state_to_tensor(state, player)
         features = self.model(input)
         value = self.value_head(features)
         policy = self.policy_head(features)
