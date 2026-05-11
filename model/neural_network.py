@@ -43,6 +43,7 @@ class AlphaZeroNetwork(torch.nn.Module):
     def __init__(self, in_channels, out_channels, board_height, board_width, num_actions, res_blocks=5, p=0.3):      
         super(AlphaZeroNetwork, self).__init__()
         self.flatt_size = out_channels * board_height * board_width
+        self.hidden_size = 256
         self.model = torch.nn.Sequential(
             ConvBatchBlock(in_channels=in_channels, out_channels=out_channels),
             torch.nn.ReLU(),
@@ -52,16 +53,16 @@ class AlphaZeroNetwork(torch.nn.Module):
         )
         
         self.value_head = torch.nn.Sequential(
-            torch.nn.Linear(self.flatt_size, self.flatt_size),
+            torch.nn.Linear(self.flatt_size, self.hidden_size),
             torch.nn.ReLU(),
-            torch.nn.Linear(self.flatt_size, 1),
+            torch.nn.Linear(self.hidden_size, 1),
             torch.nn.Tanh()
         )
         
         self.policy_head = torch.nn.Sequential(
-            torch.nn.Linear(self.flatt_size, self.flatt_size),
+            torch.nn.Linear(self.flatt_size, self.hidden_size),
             torch.nn.ReLU(),
-            torch.nn.Linear(self.flatt_size, num_actions),
+            torch.nn.Linear(self.hidden_size, num_actions),
             torch.nn.Softmax(dim=1)
         )
 
@@ -71,7 +72,7 @@ class AlphaZeroNetwork(torch.nn.Module):
         num_channels = 17
         num_rows = board.shape[0]
         num_cols = board.shape[1]
-        tensor = np.zeros((num_channels, num_rows, num_cols))
+        tensor = np.zeros((num_channels, num_rows, num_cols), dtype=np.float32)
 
         # white pieces
         for piece in range(1, 7):
@@ -96,18 +97,24 @@ class AlphaZeroNetwork(torch.nn.Module):
         if state.black_big_castling_possible:
             tensor[16] = np.ones((num_rows, num_cols))
 
-        return tensor
+        return torch.from_numpy(tensor).unsqueeze(0)
 
-    def forward(self, state, player):
+    def forward(self, state, player=None):
         if isinstance(state, torch.Tensor):
-            input = state
+            input_tensor = state
         else:
-            input = self.state_to_tensor(state, player)
-        features = self.model(input)
+            input_tensor = self.state_to_tensor(state, player)
+
+        device = next(self.parameters()).device
+
+        input_tensor = input_tensor.float().to(device)
+
+        features = self.model(input_tensor)
         value = self.value_head(features)
         policy = self.policy_head(features)
+
         return value, policy
-   
+
     
     
 
