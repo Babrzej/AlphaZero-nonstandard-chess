@@ -51,10 +51,10 @@ class MCTS:
         return probs / s if s > 0 else np.ones(len(probs)) / len(probs)
 
     def select(self, node):
-        if node.terminal:
+        if node.terminal or len(node.possible_moves) == 0:
             return -1, node
 
-        values = np.empty((len(node.possible_moves), 2), dtype=float)
+        values = np.zeros((len(node.possible_moves), 2), dtype=float)
         values[:] = np.array([
             (c.value, c.visits) if isinstance(c, Node) else (0.0, 0.0)
             for c in node.children
@@ -72,7 +72,7 @@ class MCTS:
         child = Node(action=node.possible_moves[move], state=state, parent=node, player=3 - node.player)
         child.possible_moves = self.game.actions(state, 3 - node.player)
         child.children = np.empty(len(child.possible_moves), dtype=object)
-        if reward != 0:
+        if reward != 0 or len(child.possible_moves) == 0:
             child.terminal = True
             child.reward = reward
         node.children[move] = child
@@ -133,13 +133,25 @@ class MCTS:
                     self.backpropagate(new_node, value_tensor.item())
 
     def output(self):
+        if len(self.root.possible_moves) == 0:
+            # No legal moves exist in this state
+            return None, np.array([])
+
         visits = np.zeros(len(self.root.children))
         visits[:] = [
             c.visits if isinstance(c, Node) else 0
             for c in self.root.children
         ]
-        best = np.argmax(visits)
-        policy = visits / np.sum(visits)
+
+        sum_visits = np.sum(visits)
+        if sum_visits > 0:
+            best = np.argmax(visits)
+            policy = visits / sum_visits
+        else:
+            # Fallback: if no nodes were visited during search, use prior network policy
+            best = np.argmax(self.root.policy) if self.root.policy is not None else 0
+            policy = self.root.policy if self.root.policy is not None else np.ones(len(visits)) / len(visits)
+
         best_move = self.root.possible_moves[best]
         return best_move, policy
 
