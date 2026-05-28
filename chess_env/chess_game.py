@@ -1,6 +1,6 @@
 # functions supporting chess project
 import numpy as np
-
+from chess_env.action_mapper import ActionMapper
 # -----------------------------------------------------------
 # Chess
 
@@ -120,6 +120,7 @@ class Chess():
         return __Board
 
     def __init__(self, filename = ""):
+        self.mapper = ActionMapper(num_rows=5, num_cols=5)
         if len(filename) > 0:
             self.initial_board_name = filename
             self.InitialBoard = self.__read_board(filename+'.txt')
@@ -618,7 +619,7 @@ class Chess():
                     Reward = -1
                     NextState.white_blocked = True
 
-        # --- NOWE: Historia pozycji do trzykrotnego powtórzenia ---
+        # --- Historia pozycji do trzykrotnego powtórzenia ---
         pos_key = (NextState.Board.tobytes(), player_opo, 
                    NextState.white_small_castling_possible, NextState.black_small_castling_possible,
                    NextState.en_passant_target)
@@ -1037,6 +1038,12 @@ class Chess():
         #        game_object.action_desc(State,action) + '\n')
         self.print_chessboard(NextState.Board,f)
         f.write("\n")
+
+    def action_to_index(self, move):
+        return self.mapper.action_to_index(move)
+
+    def index_to_action(self, index, board_state):
+        return self.mapper.index_to_action(index, board_state)
 
     # end of class Chess
 
