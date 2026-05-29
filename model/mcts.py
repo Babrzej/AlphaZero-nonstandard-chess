@@ -121,12 +121,12 @@ class MCTS:
             move, parent = self.select(self.root)
 
             if move == -1:
-                value = parent.reward
+                value = -parent.reward
                 self.backpropagate(parent, value)
             else:
                 new_node, reward = self.expand(move, parent)
                 if reward != 0:
-                    self.backpropagate(new_node, reward)
+                    self.backpropagate(new_node, -reward)
                 else:
                     value_tensor, policy_tensor = self.net(new_node.state, new_node.player)
                     new_node.policy = self.mask_and_normalize(policy_tensor, new_node)
