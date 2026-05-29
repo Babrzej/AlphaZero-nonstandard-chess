@@ -14,8 +14,8 @@ from model.neural_network import AlphaZeroNetwork
 # ARENA CONFIGURATION
 # ==========================================
 # Put your specific .pth files here, or type "random" to test against a baseline
-BOT_1_FILE = "model/alphazero_model_ep18.pth"
-BOT_2_FILE = "model/alphazero_model_ep9.pth"
+BOT_1_FILE = "model/alphazero_model_ep80.pth"
+BOT_2_FILE = "random"
 
 NUM_GAMES = 10
 MCTS_SIMS = 75  # Keep this matching your training simulations

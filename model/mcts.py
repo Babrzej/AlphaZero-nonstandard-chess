@@ -1,6 +1,6 @@
 import numpy as np
 
-c_ucb = np.sqrt(2)
+c_ucb = 1
 
 
 class Node:

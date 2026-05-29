@@ -23,7 +23,7 @@ from chess_env.chess_game import Chess
 # ==========================================
 EPISODES = 50
 GAMES_PER_EPISODE = 20
-MCTS_SIMS = 75
+MCTS_SIMS = 150
 EPOCHS = 5
 BATCH_SIZE = 32
 MAX_GAME_STEPS = 50
@@ -69,19 +69,31 @@ def play_game(shared_net, game_path, worker_id):
     while True:
         step += 1
 
-        # Heartbeat to show progress
-        if step % 10 == 0:
-            print(f"  [Worker {worker_id}] playing move {step}...", flush=True)
-
         legal_moves = game.actions(state, player)
         if len(legal_moves) == 0:
             return assign_rewards(dataset, 0, player)
 
+        # MCTS uses the shared network across CPU cores
         mcts = MCTS(game, state, player, shared_net)
         with torch.no_grad():
             mcts.iter(MCTS_SIMS)
 
-        best_move, local_policy = mcts.output()
+        # 1. Grab the policy probabilities, but ignore MCTS's default best_move
+        _, local_policy = mcts.output()
+
+        # 2. APPLY TEMPERATURE DECAY
+        if step < 15:
+            # Temperature = 1 (Exploration phase)
+            # Pick a move proportionally based on MCTS visit counts
+            # (Adding a tiny safety fallback for numpy floating point math)
+            local_policy = local_policy / np.sum(local_policy)
+            chosen_idx = np.random.choice(len(local_policy), p=local_policy)
+            best_move = mcts.root.possible_moves[chosen_idx]
+        else:
+            # Temperature = 0 (Exploitation phase)
+            # Pick the absolute most visited move to force checkmates
+            chosen_idx = np.argmax(local_policy)
+            best_move = mcts.root.possible_moves[chosen_idx]
 
         full_policy = np.zeros(1225, dtype=np.float32)
         for idx, m in enumerate(mcts.root.possible_moves):
@@ -105,14 +117,22 @@ def play_game(shared_net, game_path, worker_id):
 
 def assign_rewards(dataset, final_reward, winning_player):
     training_data = []
-    for state_tensor, full_policy, node_player in dataset:
-        if final_reward == 0:
-            value = 0.0
-        else:
-            value = 1.0 if node_player == winning_player else -1.0
-        training_data.append((state_tensor, full_policy, np.array([value], dtype=np.float32)))
-    return training_data
 
+    # --- OVERSAMPLING MULTIPLIER ---
+    # If the game was a draw, add it to the buffer once.
+    # If someone actually won, add it 5 times so the network studies it harder!
+    multiplier = 1 if final_reward == 0 else 5
+
+    for _ in range(multiplier):
+        for state_tensor, full_policy, node_player in dataset:
+            if final_reward == 0:
+                value = 0.0
+            else:
+                value = 1.0 if node_player == winning_player else -1.0
+
+            training_data.append((state_tensor, full_policy, np.array([value], dtype=np.float32)))
+
+    return training_data
 
 def train_network(net, replay_buffer, optimizer):
     """Trains the network by sampling random batches from the historical replay buffer."""
@@ -171,7 +191,7 @@ def main():
 
     net.share_memory()
 
-    optimizer = optim.Adam(net.parameters(), lr=0.001, weight_decay=1e-4)
+    optimizer = optim.Adam(net.parameters(), lr=0.0001, weight_decay=1e-4)
     replay_buffer = deque(maxlen=BUFFER_SIZE)
 
     # Shift the loop range to account for the loaded episode
