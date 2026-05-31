@@ -21,13 +21,13 @@ from chess_env.chess_game import Chess
 # ==========================================
 # CPU-OPTIMIZED HYPERPARAMETERS
 # ==========================================
-EPISODES = 50
-GAMES_PER_EPISODE = 20
-MCTS_SIMS = 150
+EPISODES = 20
+GAMES_PER_EPISODE = 64
+MCTS_SIMS = 180
 EPOCHS = 5
-BATCH_SIZE = 32
-MAX_GAME_STEPS = 50
-BUFFER_SIZE = 10000
+BATCH_SIZE = 64
+MAX_GAME_STEPS = 100
+BUFFER_SIZE = 25000
 NUM_WORKERS = max(1, os.cpu_count() - 2)
 
 
@@ -35,7 +35,7 @@ NUM_WORKERS = max(1, os.cpu_count() - 2)
 
 def get_latest_checkpoint():
     """Scans the directory for the newest model checkpoint and returns its path and episode number."""
-    checkpoints = glob.glob("alphazero_model_ep*.pth")
+    checkpoints = glob.glob("model/alphazero_model_ep20.pth")
     if not checkpoints:
         return None, 0
 
@@ -82,7 +82,7 @@ def play_game(shared_net, game_path, worker_id):
         _, local_policy = mcts.output()
 
         # 2. APPLY TEMPERATURE DECAY
-        if step < 15:
+        if step < 8:
             # Temperature = 1 (Exploration phase)
             # Pick a move proportionally based on MCTS visit counts
             # (Adding a tiny safety fallback for numpy floating point math)
@@ -121,12 +121,12 @@ def assign_rewards(dataset, final_reward, winning_player):
     # --- OVERSAMPLING MULTIPLIER ---
     # If the game was a draw, add it to the buffer once.
     # If someone actually won, add it 5 times so the network studies it harder!
-    multiplier = 1 if final_reward == 0 else 5
+    #multiplier = 1 if final_reward == 0 else 5
 
-    for _ in range(multiplier):
+    for _ in range(1):
         for state_tensor, full_policy, node_player in dataset:
             if final_reward == 0:
-                value = 0.0
+                value = -0.3
             else:
                 value = 1.0 if node_player == winning_player else -1.0
 
@@ -174,7 +174,7 @@ def train_network(net, replay_buffer, optimizer):
 
 def main():
     print(f"Initializing Game and Network for CPU Multiprocessing ({NUM_WORKERS} workers)...")
-    game_path = "/home/babrzej/Documents/AlphaZero-nonstandard-chess/chess_env/boards/szachy_plansza_5x5"
+    game_path = "chess_env/boards/szachy_plansza_5x5"
 
     net = AlphaZeroNetwork(17, 32, 5, 5, 1225)
     net.to("cpu")

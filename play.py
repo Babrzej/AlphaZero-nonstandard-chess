@@ -12,8 +12,8 @@ from model.mcts import MCTS
 from chess_env.chess_game import Chess
 from chess_env.chess_interface import play_with_strategy
 
-MCTS_SIMS = 400  # Number of search simulations (400-800 provides a strong, fast opponent)
-MODEL_PATH = "alphazero_model_ep9.pth"
+MCTS_SIMS = 1000  # Number of search simulations (400-800 provides a strong, fast opponent)
+MODEL_PATH = "model/alphazero_model_ep101.pth"
 
 
 class AlphaZeroStrategy:
@@ -55,7 +55,7 @@ class AlphaZeroStrategy:
 def main():
     print("Initializing 5x5 Chess game and neural network...")
     # Load 5x5 board configurations
-    game = Chess("/home/babrzej/Documents/AlphaZero-nonstandard-chess/chess_env/boards/szachy_plansza_5x5")
+    game = Chess("chess_env/boards/szachy_plansza_5x5")
 
     # Initialize neural network with 5x5 board specifications
     net = AlphaZeroNetwork(17, 32, 5, 5, 1225)
@@ -73,7 +73,7 @@ def main():
 
     # Launch Pygame chess interface
     print("Launching Graphic Interface... Enjoy the game!")
-    play_with_strategy(game, ai_strategy, str_player=2)
+    play_with_strategy(game, ai_strategy, str_player=1)
 
 
 if __name__ == "__main__":
