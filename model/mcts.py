@@ -56,7 +56,7 @@ class MCTS:
 
         values = np.zeros((len(node.possible_moves), 2), dtype=float)
         values[:] = np.array([
-            (c.value, c.visits) if isinstance(c, Node) else (0.0, 0.0)
+            (-c.value, c.visits) if isinstance(c, Node) else (0.0, 0.0)
             for c in node.children
         ]).reshape(-1, 2)
         ucb = calc_ucb(values, node.visits, node.policy)
@@ -84,7 +84,7 @@ class MCTS:
 
         node.visits += 1
         node.value += value
-        self.backpropagate(node.parent, -value)
+        self.backpropagate(node.parent, -value * 0.95)
 
     def print_tree(self, node=None, depth=0, max_depth=3):
         if node is None:
@@ -121,12 +121,18 @@ class MCTS:
             move, parent = self.select(self.root)
 
             if move == -1:
-                value = -parent.reward
+                if parent.reward != 0:
+                    value = -1.0
+                else:
+                    value = -0.3 
                 self.backpropagate(parent, value)
             else:
                 new_node, reward = self.expand(move, parent)
+                
                 if reward != 0:
-                    self.backpropagate(new_node, -reward)
+                    self.backpropagate(new_node, -1.0)
+                elif len(new_node.possible_moves) == 0:
+                    self.backpropagate(new_node, -0.3)
                 else:
                     value_tensor, policy_tensor = self.net(new_node.state, new_node.player)
                     new_node.policy = self.mask_and_normalize(policy_tensor, new_node)
