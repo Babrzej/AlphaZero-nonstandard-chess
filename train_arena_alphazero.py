@@ -15,9 +15,9 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.multiprocessing as mp
 
-from model.neural_network import AlphaZeroNetwork
-from model.mcts import MCTS
-from chess_env.chess_game import Chess
+from src.model.neural_network import AlphaZeroNetwork
+from src.model.mcts import MCTS
+from src.game_logic.chess_game import Chess
 
 # ==========================================
 # SYSTEM PARAMETERS
@@ -210,7 +210,7 @@ def train_network(net, replay_buffer, optimizer):
 
 def main():
     print(f"Initializing Game and Network for CPU Multiprocessing ({NUM_WORKERS} workers)...")
-    game_path = "chess_env/boards/szachy_plansza_5x5"
+    game_path = "boards/szachy_plansza_5x5"
     game = Chess(game_path)
     
     net = AlphaZeroNetwork(17, 32, 5, 5, 1225)
