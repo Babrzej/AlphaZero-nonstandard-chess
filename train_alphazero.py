@@ -1,8 +1,13 @@
 import os
 import random
 import numpy as np
+import glob
+import re
 from collections import deque
 import concurrent.futures
+
+# CRITICAL: Prevent PyTorch from spawning hidden threads and freezing the CPU
+os.environ["OMP_NUM_THREADS"] = "1"
 
 import torch
 import torch.nn as nn
@@ -16,23 +21,43 @@ from chess_env.chess_game import Chess
 # ==========================================
 # CPU-OPTIMIZED HYPERPARAMETERS
 # ==========================================
-EPISODES = 50
-GAMES_PER_EPISODE = 20  # Lowered: We use a buffer now, so we need fewer new games per loop
-MCTS_SIMS = 75  # Lowered: Saves CPU time. The buffer compensates for lower quality.
-EPOCHS = 5  # Increased: Train harder on the data we have
-BATCH_SIZE = 32  # Small batch size is perfect for CPU
+EPISODES = 20
+GAMES_PER_EPISODE = 64
+MCTS_SIMS = 180
+EPOCHS = 5
+BATCH_SIZE = 64
 MAX_GAME_STEPS = 100
-BUFFER_SIZE = 10000  # The network will remember the last 10,000 moves
-NUM_WORKERS = max(1, os.cpu_count() - 2)  # Leave 2 cores free so your PC doesn't freeze
+BUFFER_SIZE = 25000
+NUM_WORKERS = max(1, os.cpu_count() - 2)
 
 
 # ==========================================
 
-def play_game(shared_net, game_path):
-    """
-    Worker function to play a single game.
-    It instantiates its own game environment to prevent multi-threading collisions.
-    """
+def get_latest_checkpoint():
+    """Scans the directory for the newest model checkpoint and returns its path and episode number."""
+    checkpoints = glob.glob("model/alphazero_model_ep20.pth")
+    if not checkpoints:
+        return None, 0
+
+    latest_ep = 0
+    latest_file = ""
+
+    for cp in checkpoints:
+        # Extract the number from the filename using regex
+        match = re.search(r"alphazero_model_ep(\d+)\.pth", cp)
+        if match:
+            ep_num = int(match.group(1))
+            if ep_num > latest_ep:
+                latest_ep = ep_num
+                latest_file = cp
+
+    return latest_file, latest_ep
+
+
+def play_game(shared_net, game_path, worker_id):
+    """Worker function to play a single game."""
+    torch.set_num_threads(1)
+
     game = Chess(game_path)
     state = game.initial_state()
     player = 1
@@ -43,6 +68,7 @@ def play_game(shared_net, game_path):
 
     while True:
         step += 1
+
         legal_moves = game.actions(state, player)
         if len(legal_moves) == 0:
             return assign_rewards(dataset, 0, player)
@@ -52,7 +78,22 @@ def play_game(shared_net, game_path):
         with torch.no_grad():
             mcts.iter(MCTS_SIMS)
 
-        best_move, local_policy = mcts.output()
+        # 1. Grab the policy probabilities, but ignore MCTS's default best_move
+        _, local_policy = mcts.output()
+
+        # 2. APPLY TEMPERATURE DECAY
+        if step < 8:
+            # Temperature = 1 (Exploration phase)
+            # Pick a move proportionally based on MCTS visit counts
+            # (Adding a tiny safety fallback for numpy floating point math)
+            local_policy = local_policy / np.sum(local_policy)
+            chosen_idx = np.random.choice(len(local_policy), p=local_policy)
+            best_move = mcts.root.possible_moves[chosen_idx]
+        else:
+            # Temperature = 0 (Exploitation phase)
+            # Pick the absolute most visited move to force checkmates
+            chosen_idx = np.argmax(local_policy)
+            best_move = mcts.root.possible_moves[chosen_idx]
 
         full_policy = np.zeros(1225, dtype=np.float32)
         for idx, m in enumerate(mcts.root.possible_moves):
@@ -65,8 +106,10 @@ def play_game(shared_net, game_path):
         state, reward = game.next_state_and_reward(player, state, best_move)
 
         if reward != 0:
+            print(f"  [Worker {worker_id}] Game finished at step {step} (Win/Loss).", flush=True)
             return assign_rewards(dataset, reward, player)
         if step >= MAX_GAME_STEPS:
+            print(f"  [Worker {worker_id}] Game finished at step {step} (Draw by limit).", flush=True)
             return assign_rewards(dataset, 0, player)
 
         player = 3 - player
@@ -74,14 +117,22 @@ def play_game(shared_net, game_path):
 
 def assign_rewards(dataset, final_reward, winning_player):
     training_data = []
-    for state_tensor, full_policy, node_player in dataset:
-        if final_reward == 0:
-            value = 0.0
-        else:
-            value = 1.0 if node_player == winning_player else -1.0
-        training_data.append((state_tensor, full_policy, np.array([value], dtype=np.float32)))
-    return training_data
 
+    # --- OVERSAMPLING MULTIPLIER ---
+    # If the game was a draw, add it to the buffer once.
+    # If someone actually won, add it 5 times so the network studies it harder!
+    #multiplier = 1 if final_reward == 0 else 5
+
+    for _ in range(1):
+        for state_tensor, full_policy, node_player in dataset:
+            if final_reward == 0:
+                value = -0.3
+            else:
+                value = 1.0 if node_player == winning_player else -1.0
+
+            training_data.append((state_tensor, full_policy, np.array([value], dtype=np.float32)))
+
+    return training_data
 
 def train_network(net, replay_buffer, optimizer):
     """Trains the network by sampling random batches from the historical replay buffer."""
@@ -92,14 +143,12 @@ def train_network(net, replay_buffer, optimizer):
     net.train()
     mse_loss = nn.MSELoss()
 
-    # Calculate how many batches make up one "epoch" of our current buffer size
     steps_per_epoch = len(replay_buffer) // BATCH_SIZE
 
     for epoch in range(EPOCHS):
         total_loss = 0.0
 
         for _ in range(steps_per_epoch):
-            # 1. Randomly sample a batch from the past 10,000 moves
             batch = random.sample(replay_buffer, BATCH_SIZE)
             b_states, b_target_pol, b_target_val = zip(*batch)
 
@@ -125,33 +174,38 @@ def train_network(net, replay_buffer, optimizer):
 
 def main():
     print(f"Initializing Game and Network for CPU Multiprocessing ({NUM_WORKERS} workers)...")
-    #change for relative path
-    game_path = "/home/babrzej/Documents/AlphaZero-nonstandard-chess/chess_env/boards/szachy_plansza_5x5"
+    game_path = "chess_env/boards/szachy_plansza_5x5"
 
-    # Initialize network and force it to CPU
     net = AlphaZeroNetwork(17, 32, 5, 5, 1225)
     net.to("cpu")
 
-    # CRITICAL: Share memory so worker processes can read the weights without copying
+    # --- AUTO-RESUME LOGIC ---
+    latest_file, start_episode = get_latest_checkpoint()
+    if latest_file:
+        print(f"\n[!] Found existing checkpoint: {latest_file}")
+        print(f"[!] Resuming training from Episode {start_episode + 1}")
+        # Map location to CPU to prevent CUDA mismatch errors
+        net.load_state_dict(torch.load(latest_file, map_location="cpu", weights_only=True))
+    else:
+        print("\n[!] No existing checkpoints found. Starting from scratch (Episode 1).")
+
     net.share_memory()
 
-    optimizer = optim.Adam(net.parameters(), lr=0.001, weight_decay=1e-4)
-
-    # The new Replay Buffer
+    optimizer = optim.Adam(net.parameters(), lr=0.0001, weight_decay=1e-4)
     replay_buffer = deque(maxlen=BUFFER_SIZE)
 
-    for episode in range(EPISODES):
-        print(f"\n=== EPISODE {episode + 1}/{EPISODES} ===")
+    # Shift the loop range to account for the loaded episode
+    target_total_episodes = start_episode + EPISODES
 
-        # 1. Parallel Self Play Phase
+    for current_ep in range(start_episode + 1, target_total_episodes + 1):
+        print(f"\n=== EPISODE {current_ep}/{target_total_episodes} ===")
+
         print(f"Phase 1: Self-Play (Generating {GAMES_PER_EPISODE} games across {NUM_WORKERS} cores)")
 
         new_data_count = 0
         with concurrent.futures.ProcessPoolExecutor(max_workers=NUM_WORKERS) as executor:
-            # Submit all games to the worker pool
-            futures = [executor.submit(play_game, net, game_path) for _ in range(GAMES_PER_EPISODE)]
+            futures = [executor.submit(play_game, net, game_path, i + 1) for i in range(GAMES_PER_EPISODE)]
 
-            # As each game finishes, add its data to the replay buffer
             for i, future in enumerate(concurrent.futures.as_completed(futures)):
                 game_data = future.result()
                 replay_buffer.extend(game_data)
@@ -161,18 +215,15 @@ def main():
 
         print(f"\n  Added {new_data_count} new moves to the replay buffer.")
 
-        # 2. Training Phase
         print("Phase 2: Training Network on Replay Buffer")
         train_network(net, replay_buffer, optimizer)
 
-        # 3. Save Checkpoint
-        torch.save(net.state_dict(), f"alphazero_model_ep{episode + 1}.pth")
-        print(f"Saved checkpoint: alphazero_model_ep{episode + 1}.pth")
+        torch.save(net.state_dict(), f"alphazero_model_ep{current_ep}.pth")
+        print(f"Saved checkpoint: alphazero_model_ep{current_ep}.pth")
 
     print("\nTRAINING COMPLETE!")
 
 
 if __name__ == "__main__":
-    # Required for PyTorch multiprocessing to work correctly on Linux
     mp.set_start_method('spawn', force=True)
     main()
