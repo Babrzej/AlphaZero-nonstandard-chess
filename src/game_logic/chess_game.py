@@ -1,6 +1,6 @@
 # functions supporting chess project
 import numpy as np
-from chess_env.action_mapper import ActionMapper
+from src.game_logic.action_mapper import ActionMapper
 # -----------------------------------------------------------
 # Chess
 

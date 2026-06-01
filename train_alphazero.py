@@ -6,7 +6,6 @@ import re
 from collections import deque
 import concurrent.futures
 
-# CRITICAL: Prevent PyTorch from spawning hidden threads and freezing the CPU
 os.environ["OMP_NUM_THREADS"] = "1"
 
 import torch
@@ -14,13 +13,11 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.multiprocessing as mp
 
-from model.neural_network import AlphaZeroNetwork
-from model.mcts import MCTS
-from chess_env.chess_game import Chess
+from src.model.neural_network import AlphaZeroNetwork
+from src.model.mcts import MCTS
+from src.game_logic.chess_game import Chess
 
-# ==========================================
-# CPU-OPTIMIZED HYPERPARAMETERS
-# ==========================================
+# HYPERPARAMETERS
 EPISODES = 20
 GAMES_PER_EPISODE = 64
 MCTS_SIMS = 180
@@ -31,19 +28,14 @@ BUFFER_SIZE = 25000
 NUM_WORKERS = max(1, os.cpu_count() - 2)
 
 
-# ==========================================
-
 def get_latest_checkpoint():
-    """Scans the directory for the newest model checkpoint and returns its path and episode number."""
     checkpoints = glob.glob("model/alphazero_model_ep20.pth")
     if not checkpoints:
         return None, 0
-
     latest_ep = 0
     latest_file = ""
 
     for cp in checkpoints:
-        # Extract the number from the filename using regex
         match = re.search(r"alphazero_model_ep(\d+)\.pth", cp)
         if match:
             ep_num = int(match.group(1))
@@ -54,8 +46,7 @@ def get_latest_checkpoint():
     return latest_file, latest_ep
 
 
-def play_game(shared_net, game_path, worker_id):
-    """Worker function to play a single game."""
+def play_game(net, game_path, worker_id):
     torch.set_num_threads(1)
 
     game = Chess(game_path)
@@ -64,7 +55,7 @@ def play_game(shared_net, game_path, worker_id):
     dataset = []
     step = 0
 
-    shared_net.eval()
+    net.eval()
 
     while True:
         step += 1
@@ -73,34 +64,28 @@ def play_game(shared_net, game_path, worker_id):
         if len(legal_moves) == 0:
             return assign_rewards(dataset, 0, player)
 
-        # MCTS uses the shared network across CPU cores
-        mcts = MCTS(game, state, player, shared_net)
+        mcts = MCTS(game, state, player, net)
         with torch.no_grad():
             mcts.iter(MCTS_SIMS)
 
-        # 1. Grab the policy probabilities, but ignore MCTS's default best_move
         _, local_policy = mcts.output()
 
-        # 2. APPLY TEMPERATURE DECAY
         if step < 8:
-            # Temperature = 1 (Exploration phase)
-            # Pick a move proportionally based on MCTS visit counts
-            # (Adding a tiny safety fallback for numpy floating point math)
+            # Temperature = 1
             local_policy = local_policy / np.sum(local_policy)
-            chosen_idx = np.random.choice(len(local_policy), p=local_policy)
-            best_move = mcts.root.possible_moves[chosen_idx]
+            chosen_id = np.random.choice(len(local_policy), p=local_policy)
+            best_move = mcts.root.possible_moves[chosen_id]
         else:
-            # Temperature = 0 (Exploitation phase)
-            # Pick the absolute most visited move to force checkmates
-            chosen_idx = np.argmax(local_policy)
-            best_move = mcts.root.possible_moves[chosen_idx]
+            # Temperature = 0
+            chosen_id = np.argmax(local_policy)
+            best_move = mcts.root.possible_moves[chosen_id]
 
         full_policy = np.zeros(1225, dtype=np.float32)
-        for idx, m in enumerate(mcts.root.possible_moves):
-            action_idx = game.action_to_index(m)
-            full_policy[action_idx] = local_policy[idx]
+        for id, m in enumerate(mcts.root.possible_moves):
+            action_id = game.action_to_index(m)
+            full_policy[action_id] = local_policy[id]
 
-        state_tensor = shared_net.state_to_tensor(state, player).squeeze(0)
+        state_tensor = net.state_to_tensor(state, player).squeeze(0)
         dataset.append([state_tensor, full_policy, player])
 
         state, reward = game.next_state_and_reward(player, state, best_move)
@@ -118,26 +103,20 @@ def play_game(shared_net, game_path, worker_id):
 def assign_rewards(dataset, final_reward, winning_player):
     training_data = []
 
-    # --- OVERSAMPLING MULTIPLIER ---
-    # If the game was a draw, add it to the buffer once.
-    # If someone actually won, add it 5 times so the network studies it harder!
-    #multiplier = 1 if final_reward == 0 else 5
+    for state_tensor, full_policy, node_player in dataset:
+        if final_reward == 0:
+            value = -0.3
+        else:
+            value = 1.0 if node_player == winning_player else -1.0
 
-    for _ in range(1):
-        for state_tensor, full_policy, node_player in dataset:
-            if final_reward == 0:
-                value = -0.3
-            else:
-                value = 1.0 if node_player == winning_player else -1.0
-
-            training_data.append((state_tensor, full_policy, np.array([value], dtype=np.float32)))
+        training_data.append((state_tensor, full_policy, np.array([value], dtype=np.float32)))
 
     return training_data
 
 def train_network(net, replay_buffer, optimizer):
-    """Trains the network by sampling random batches from the historical replay buffer."""
+
     if len(replay_buffer) < BATCH_SIZE:
-        print("    Not enough data in buffer to train yet.")
+        print("Not enough data in buffer to train yet.")
         return
 
     net.train()
@@ -174,17 +153,15 @@ def train_network(net, replay_buffer, optimizer):
 
 def main():
     print(f"Initializing Game and Network for CPU Multiprocessing ({NUM_WORKERS} workers)...")
-    game_path = "chess_env/boards/szachy_plansza_5x5"
+    game_path = "boards/szachy_plansza_5x5"
 
     net = AlphaZeroNetwork(17, 32, 5, 5, 1225)
     net.to("cpu")
 
-    # --- AUTO-RESUME LOGIC ---
     latest_file, start_episode = get_latest_checkpoint()
     if latest_file:
         print(f"\n[!] Found existing checkpoint: {latest_file}")
         print(f"[!] Resuming training from Episode {start_episode + 1}")
-        # Map location to CPU to prevent CUDA mismatch errors
         net.load_state_dict(torch.load(latest_file, map_location="cpu", weights_only=True))
     else:
         print("\n[!] No existing checkpoints found. Starting from scratch (Episode 1).")
@@ -194,7 +171,6 @@ def main():
     optimizer = optim.Adam(net.parameters(), lr=0.0001, weight_decay=1e-4)
     replay_buffer = deque(maxlen=BUFFER_SIZE)
 
-    # Shift the loop range to account for the loaded episode
     target_total_episodes = start_episode + EPISODES
 
     for current_ep in range(start_episode + 1, target_total_episodes + 1):

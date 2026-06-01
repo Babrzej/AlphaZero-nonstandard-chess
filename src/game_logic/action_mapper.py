@@ -3,21 +3,19 @@ class ActionMapper:
         self.num_rows = num_rows
         self.num_cols = num_cols
         self.num_squares = num_rows * num_cols
-        self.moves_per_square = 49  # 32 rays + 8 knights + 9 under-promotions
+        self.moves_per_square = 49
         self.total_actions = self.num_squares * self.moves_per_square
 
-        # Piece constants (Adjust to match your engine's self.Pawn, etc.)
         self.KNIGHT = 2
         self.BISHOP = 3
         self.ROOK = 4
         self.QUEEN = 5
-        self.BLACK_SHIFT = 1000  # Your shift identifier
+        self.BLACK_SHIFT = 1000
 
     def _get_base_piece(self, piece):
         return piece - self.BLACK_SHIFT if piece > self.BLACK_SHIFT else piece
 
     def action_to_index(self, move):
-        """Converts [piece, r1, c1, r2, c2, (promo)] -> 0-1224"""
         piece, r1, c1, r2, c2 = move[0], move[1], move[2], move[3], move[4]
         promo = move[5] if len(move) == 6 else None
 
@@ -44,7 +42,7 @@ class ActionMapper:
                           (-2, -1): 39}
             move_type = knight_map.get((dr, dc), -1)
 
-        # 3. Rays (0-31)
+        # 3. Queen moves (0-31)
         if move_type == -1:
             dist = max(abs(dr), abs(dc))
             directions = [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]
@@ -55,12 +53,11 @@ class ActionMapper:
                 dir_idx = directions.index((unit_dr, unit_dc))
                 move_type = (dir_idx * 4) + (dist - 1)
             except ValueError:
-                return None  # Should not happen with legal moves
+                return None
 
         return (square_idx * self.moves_per_square) + move_type
 
     def index_to_action(self, index, board_state_at_idx):
-        """Converts 0-1224 -> [piece, r1, c1, r2, c2, (promo)]"""
         square_idx = index // self.moves_per_square
         move_type = index % self.moves_per_square
 
@@ -76,7 +73,7 @@ class ActionMapper:
             dist = (move_type % 4) + 1
             dr, dc = directions[dir_idx]
             r2, c2 = r1 + dr * dist, c1 + dc * dist
-            # Check if this ray move is actually a queen promotion
+            # Check if this ray move is a queen promotion
             if self._get_base_piece(piece) == 1 and (r2 == 0 or r2 == 4):  # Pawn at edge
                 return [piece, r1, c1, r2, c2, self.QUEEN + shift]
             return [piece, r1, c1, r2, c2]

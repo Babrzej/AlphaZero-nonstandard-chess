@@ -154,7 +154,7 @@ class MCTS:
             best = np.argmax(visits)
             policy = visits / sum_visits
         else:
-            # Fallback: if no nodes were visited during search, use prior network policy
+            # if no nodes were visited during search, use prior network policy
             best = np.argmax(self.root.policy) if self.root.policy is not None else 0
             policy = self.root.policy if self.root.policy is not None else np.ones(len(visits)) / len(visits)
 
