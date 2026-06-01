@@ -195,3 +195,85 @@ $$
 * dim[batch_size, num_actions] = choose direction to normalize[0: across samples 1: across actions]
 
 ## **Self-Play**
+
+Self-play generates training examples by letting the current network play both sides of the game.
+
+### Game generation flow (`play_game`)
+
+For each move:
+
+1. Build an MCTS rooted at the current state.
+2. Run `MCTS_SIMS` simulations (`180` by default).
+3. Read the search policy from the root.
+4. Choose a move:
+   * first 7 plies: sample stochastically (temperature = 1),
+   * later plies: choose argmax (temperature = 0).
+5. Save one training sample:
+   * encoded state tensor (`state_to_tensor`),
+   * full action policy vector of size `1225`,
+   * player-to-move.
+6. Apply the selected move and continue until terminal state or step limit.
+
+Stopping conditions:
+
+* no legal moves,
+* environment reward is non-zero (win/loss),
+* `MAX_GAME_STEPS` reached (`100`, treated as draw by limit).
+
+### Reward assignment (`assign_rewards`)
+
+After game end, every stored position gets a value target:
+
+* win/loss: `+1` for positions from the winner's perspective, `-1` otherwise,
+* draw: fixed value `-0.3`.
+
+Each replay item is: `(state_tensor, policy_target, value_target)`.
+
+## **Training Loop (`train_alphazero.py`)**
+
+The script alternates between data generation and network optimization.
+
+### Hyperparameters
+
+* `EPISODES = 20`
+* `GAMES_PER_EPISODE = 64`
+* `MCTS_SIMS = 180`
+* `EPOCHS = 5`
+* `BATCH_SIZE = 64`
+* `MAX_GAME_STEPS = 100`
+* `BUFFER_SIZE = 25000`
+* `NUM_WORKERS = max(1, os.cpu_count() - 2)`
+
+### Episode structure
+
+For each episode:
+
+1. **Self-play phase**
+   * Run `GAMES_PER_EPISODE` games in parallel with `ProcessPoolExecutor`.
+   * Extend a replay buffer (`deque`) with all generated move samples.
+2. **Training phase**
+   * Train for `EPOCHS` over random mini-batches from replay buffer.
+   * Loss = value MSE + policy cross-entropy style loss  
+     (`-sum(target_policy * log(pred_policy)) / BATCH_SIZE`).
+3. **Checkpointing**
+   * Save model weights as `alphazero_model_ep{episode}.pth`.
+
+### Checkpoint resume behavior
+
+At startup, training tries to load the latest available checkpoint pattern used in the script and resumes from the detected episode index; otherwise it starts from episode 1.
+
+### Multiprocessing note
+
+The entrypoint sets `torch.multiprocessing` start method to `spawn` and shares network memory before self-play workers are launched.
+
+## Tournament Results
+
+### Head-to-Head Tournament Matrix
+
+![Head-to-Head Tournament Matrix](https://github.com/user-attachments/assets/6a767cab-1cc3-4d89-87cc-831f6b691cb7)
+
+### Tournament vs Random Visualization
+
+![Tournament Visualization](https://github.com/user-attachments/assets/7366f372-e819-4860-9393-8140139075f7)
+
+We can observe that model is indeed becoming better. Even though it got worse for a while.
